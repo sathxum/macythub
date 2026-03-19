@@ -1,0 +1,85 @@
+name: Nexus macOS VNC Deployment
+on: 
+  push:
+    branches: [ main, master ]
+    paths:
+      - '.github/workflows/nexus-vnc.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: macos-latest
+    timeout-minutes: 360
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+      
+    - name: Setup Environment
+      run: |
+        echo "╔════════════════════════════════════╗"
+        echo "║   NEXUS macOS VNC v3.0             ║"
+        echo "╚════════════════════════════════════╝"
+        echo "[INFO] OS: macOS (Latest)"
+        echo "[INFO] Protocol: VNC (Screen Sharing)"
+        echo "[INFO] Port: 5900"
+        echo "[INFO] Visibility: PUBLIC"
+        
+    - name: Install Ngrok
+      run: |
+        brew install ngrok
+        
+    - name: Configure Ngrok
+      run: ngrok authtoken 3A1U8v4Hgshl3u7YbgmbDwX557U_2qkyufwhBM51Z3fXnhBjv
+      
+    - name: Configure Active Session (Black Screen Fix)
+      run: |
+        echo "[INFO] Applying Black Screen Fix..."
+        echo "[INFO] Changing password for active 'runner' user to connect to existing GUI."
+        sudo sysadminctl -resetPasswordFor runner -newPassword "R7k!9pL@"
+        
+    - name: Configure VNC / Screen Sharing
+      run: |
+        echo "[INFO] Disabling Firewall to ensure VNC port is open..."
+        sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off
+        
+        echo "[INFO] Enabling Remote Management and VNC..."
+        sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -configure -allowAccessFor -allUsers -privs -all
+        sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -activate -restart -agent
+        
+        echo "[INFO] Waking up display..."
+        sudo pmset -a displaysleep 0
+        sudo pmset -a sleep 0
+        sudo pmset -a hibernatemode 0
+        sudo pmset -a disablesleep 1
+        caffeinate -u -t 5 &
+        
+        echo "[SUCCESS] VNC configured on port 5900"
+        
+    - name: Establish Tunnel
+      run: |
+        echo "[INFO] Starting Ngrok tunnel on port 5900..."
+        ngrok tcp 5900 &
+        sleep 10
+        
+        TUNNEL_INFO=$(curl -s http://localhost:4040/api/tunnels)
+        if [ -n "$TUNNEL_INFO" ]; then
+          echo "[SUCCESS] VNC Tunnel Established!"
+          echo "========================================"
+          echo "VNC Address: $(echo $TUNNEL_INFO | grep -o 'tcp://[^\"]*' | head -1)"
+          echo "Username: runner  <-- (USE THIS to prevent Black Screen)"
+          echo "Password: R7k!9pL@"
+          echo "========================================"
+          echo "[INFO] Connect using a VNC Viewer that supports Apple Authentication"
+          echo "[INFO] IMPORTANT: Use 'runner' as username to see the active desktop!"
+        else
+          echo "[ERROR] Failed to establish tunnel"
+        fi
+        
+    - name: Keep Alive
+      run: |
+        echo "[INFO] Session active for 6 hours max..."
+        for i in $(seq 360 -1 1); do
+          echo "Time remaining: $i minutes"
+          sleep 60
+        done
